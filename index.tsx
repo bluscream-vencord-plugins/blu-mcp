@@ -1,3 +1,5 @@
+// Authors: Bluscream, Cursor.AI
+// Created at 2026-01-01 05:23:18
 /*
  * Vencord, a Discord client mod
  * Copyright (c) 2024 Vendicated and contributors
