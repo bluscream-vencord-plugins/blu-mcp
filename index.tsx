@@ -129,6 +129,30 @@ function inspectElement(element: Element | null): any {
     };
 }
 
+function cleanResult(obj: any, depth = 0, seen = new Set()): any {
+    if (depth > 3) return "[Max Depth]";
+    if (obj === null || obj === undefined) return obj;
+    if (typeof obj !== "object") return obj;
+    if (seen.has(obj)) return "[Circular]";
+    seen.add(obj);
+
+    if (Array.isArray(obj)) {
+        return obj.map(item => cleanResult(item, depth + 1, seen));
+    }
+
+    const cleaned: any = {};
+    for (const key in obj) {
+        try {
+            const val = obj[key];
+            if (typeof val === "function") continue;
+            cleaned[key] = cleanResult(val, depth + 1, seen);
+        } catch (e) {
+            cleaned[key] = `[Error accessing property: ${e}]`;
+        }
+    }
+    return cleaned;
+}
+
 async function handleToolCall(toolName: string, args: any): Promise<any> {
     try {
         switch (toolName) {
@@ -138,9 +162,9 @@ async function handleToolCall(toolName: string, args: any): Promise<any> {
                     throw new Error("code parameter is required and must be a string");
                 }
                 const AsyncFunction = (async function () { }).constructor as typeof Function;
-                const func = new AsyncFunction(code);
+                const func = new AsyncFunction(`try { ${code} } catch (e) { return { __error: e.message || String(e), __stack: e.stack }; }`);
                 const result = await func();
-                return result === undefined ? null : result;
+                return cleanResult(result === undefined ? null : result);
             }
 
             case "get_store": {
@@ -149,10 +173,11 @@ async function handleToolCall(toolName: string, args: any): Promise<any> {
                     throw new Error("storeName parameter is required and must be a string");
                 }
                 try {
-                    findStoreLazy(storeName);
+                    const store = findStoreLazy(storeName);
                     return {
                         name: storeName,
                         available: true,
+                        methods: Object.keys(store).filter(k => typeof store[k] === "function"),
                         note: "Use get_store_method to call specific methods on the store"
                     };
                 } catch (error) {
@@ -171,7 +196,7 @@ async function handleToolCall(toolName: string, args: any): Promise<any> {
                         throw new Error(`Method '${methodName}' not found on store '${storeName}'`);
                     }
                     const result = store[methodName](...methodArgs);
-                    return result instanceof Promise ? await result : result;
+                    return cleanResult(result instanceof Promise ? await result : result);
                 } catch (error: any) {
                     throw new Error(`Error calling ${storeName}.${methodName}: ${error.message}`);
                 }
@@ -205,13 +230,13 @@ async function handleToolCall(toolName: string, args: any): Promise<any> {
 
 // region Definition
 export default definePlugin({
-    name: pluginInfo.name,
+    name: "McpServer",
     description: pluginInfo.description,
     authors: pluginInfo.authors,
     settings,
 
     async start() {
-        if (!settings.store.enabled) {
+        if (!settings.store.pluginEnabled) {
             logger.info("MCP server is disabled");
             return;
         }
